@@ -9,6 +9,36 @@ let read_lines in_channel =
 
 let print_lines lines = Printf.printf "%s" (String.concat "\n" lines)
 
+let rec find x lst c =
+  match lst with
+  | [] -> failwith "Not Found"
+  | h :: t -> if h = x then c else find x t (c + 1)
+
+let get_seeds lines =
+  let rec seeds_aux seeds lines =
+    match lines with
+    | "" :: rest -> (List.flatten seeds, rest)
+    | seed_line :: t ->
+        seeds_aux
+          ((List.tl (String.split_on_char ':' seed_line)
+           |> List.map (fun seed_line ->
+                  String.trim seed_line |> String.split_on_char ' '
+                  |> List.map int_of_string)
+           |> List.flatten)
+          :: seeds)
+          t
+    | _ -> failwith "seed not in a single line"
+  in
+  let seeds, lines = seeds_aux [] lines in
+  let seeds_with_ranges =
+    let partitioned_by_index =
+      List.partition (fun seed -> find seed seeds 0 mod 2 = 0) seeds
+    in
+    List.combine (fst partitioned_by_index) (snd partitioned_by_index)
+  in
+
+  (seeds_with_ranges, lines)
+
 let get_next_map lines =
   let rec next_map_aux map lines =
     match lines with
@@ -18,88 +48,60 @@ let get_next_map lines =
   in
   let next_map, lines = next_map_aux [] lines in
   let cleaned_next_map =
-    (if List.length next_map = 1 then
-       List.tl (String.split_on_char ':' (List.hd next_map))
-     else List.tl (List.rev next_map))
+    List.tl (List.rev next_map)
     |> List.map String.trim
+    |> List.map (fun m -> String.split_on_char ' ' m |> List.map int_of_string)
   in
   (cleaned_next_map, lines)
 
-let find_map_for_number number map =
-  let number_int = int_of_string number in
+let find_map_for_number (number, range) map =
   let mapping =
     List.filter
       (fun potential_mapping ->
-        let potential_mapping =
-          String.split_on_char ' ' potential_mapping |> List.map int_of_string
-        in
-
-        number_int >= List.nth potential_mapping 1
-        && number_int
-           <= List.nth potential_mapping 1 + List.nth potential_mapping 2)
+        match potential_mapping with
+        | [ _; src; map_range ] ->
+            number >= src && number <= src + range && range <= map_range
+        | _ -> false)
       map
-    |> List.map (String.split_on_char ' ')
   in
   match mapping with
-  | [] -> number
-  | m :: _ -> (
-      match m with
-      | dest :: src :: range ->
-          let offset = number_int - int_of_string src in
-          string_of_int (int_of_string dest + offset)
-      | _ -> failwith "index error")
+  | [] -> (
+      try
+        let potential_mapping =
+          List.find
+            (fun potential_mapping ->
+              match potential_mapping with
+              | [ _; src; map_range ] ->
+                  number >= src && number <= src + range && range > map_range
+              | _ -> false)
+            map
+        in
+        potential_mapping
+      with _ -> [ (number, range) ])
+  | [ dest; src; map_range ] :: _ ->
+      let offset = number - src in
+      [ (dest + offset, range) ]
+  | _ -> failwith "couldnt find mapping"
 
 let find_mappings map domain =
-  print_endline "finding mappings";
-  match domain with
-  | domain :: [] ->
-      let split_domain = String.split_on_char ' ' domain in
-      [
-        List.map (fun d -> find_map_for_number d map) split_domain
-        |> String.concat " ";
-      ]
-  | _ ->
-      print_lines domain;
-      failwith "domain should be just one element"
+  List.map (fun number -> find_map_for_number number map) domain |> List.flatten
 
-let rec expand expanded_seed seeds =
-  print_endline "expanding!";
-  match seeds with
-  | start :: range :: rest ->
-      expand
-        ((List.init (int_of_string range) succ
-         |> List.map (fun m -> m + int_of_string start)
-         |> List.map string_of_int)
-        @ expanded_seed)
-        rest
-  | [] ->
-      print_endline "done expanding!";
-      [ List.rev expanded_seed |> String.concat " " ]
-  | _ -> failwith "shouldnt reach"
+let rec solve values maps =
+  try
+    let map, remaining_maps = get_next_map maps in
+    let next_values = find_mappings map values in
+    solve next_values remaining_maps
+  with _end_of_file_exn -> values
 
 let () =
   let input_channel = open_in "input.txt" in
   let lines = read_lines input_channel in
-  let seeds, remaining_lines = get_next_map lines in
-  let seed_to_soil, remaining_lines = get_next_map remaining_lines in
-  let soil_to_fertilizer, remaining_lines = get_next_map remaining_lines in
-  let fertilizer_to_water, remaining_lines = get_next_map remaining_lines in
-  let water_to_light, remaining_lines = get_next_map remaining_lines in
-  let light_to_temperature, remaining_lines = get_next_map remaining_lines in
-  let temperature_to_humidity, remaining_lines = get_next_map remaining_lines in
-  let humidity_to_location, remaining_lines = get_next_map remaining_lines in
-  let locations =
-    find_mappings seed_to_soil
-      (expand [] (String.split_on_char ' ' (List.hd seeds)))
-    |> find_mappings soil_to_fertilizer
-    |> find_mappings fertilizer_to_water
-    |> find_mappings water_to_light
-    |> find_mappings light_to_temperature
-    |> find_mappings temperature_to_humidity
-    |> find_mappings humidity_to_location
-    |> List.hd |> String.split_on_char ' ' |> List.map int_of_string
-  in
+  let seeds, remaining_lines = get_seeds lines in
+  let locations = solve seeds remaining_lines in
   let minimum_location =
-    List.fold_left min (List.hd locations) (List.tl locations)
+    List.fold_left
+      (fun acc location -> min acc (fst location))
+      (fst (List.hd locations))
+      (List.tl locations)
   in
   print_int minimum_location

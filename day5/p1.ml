@@ -22,66 +22,42 @@ let get_next_map lines =
        List.tl (String.split_on_char ':' (List.hd next_map))
      else List.tl (List.rev next_map))
     |> List.map String.trim
+    |> List.map (fun m -> String.split_on_char ' ' m |> List.map int_of_string)
   in
+
   (cleaned_next_map, lines)
 
 let find_map_for_number number map =
-  let number_int = int_of_string number in
   let mapping =
     List.filter
       (fun potential_mapping ->
-        let potential_mapping =
-          String.split_on_char ' ' potential_mapping |> List.map int_of_string
-        in
-
-        number_int >= List.nth potential_mapping 1
-        && number_int
-           <= List.nth potential_mapping 1 + List.nth potential_mapping 2)
+        match potential_mapping with
+        | [ _; src; range ] -> number >= src && number <= src + range
+        | _ -> false)
       map
-    |> List.map (String.split_on_char ' ')
   in
   match mapping with
   | [] -> number
-  | m :: _ -> (
-      match m with
-      | dest :: src :: range ->
-          let offset = number_int - int_of_string src in
-          string_of_int (int_of_string dest + offset)
-      | _ -> failwith "index error")
+  | [ dest; src; range ] :: _ ->
+      let offset = number - src in
+      dest + offset
+  | _ -> failwith "couldnt find mapping"
 
 let find_mappings map domain =
-  match domain with
-  | domain :: [] ->
-      let split_domain = String.split_on_char ' ' domain in
-      [
-        List.map (fun d -> find_map_for_number d map) split_domain
-        |> String.concat " ";
-      ]
-  | _ ->
-      print_lines domain;
-      failwith "domain should be just one element"
+  List.map (fun number -> find_map_for_number number map) domain
+
+let rec solve values maps =
+  try
+    let map, remaining_maps = get_next_map maps in
+    let next_values = find_mappings map values in
+    solve next_values remaining_maps
+  with _end_of_file_exn -> values
 
 let () =
   let input_channel = open_in "input.txt" in
   let lines = read_lines input_channel in
   let seeds, remaining_lines = get_next_map lines in
-  let seed_to_soil, remaining_lines = get_next_map remaining_lines in
-  let soil_to_fertilizer, remaining_lines = get_next_map remaining_lines in
-  let fertilizer_to_water, remaining_lines = get_next_map remaining_lines in
-  let water_to_light, remaining_lines = get_next_map remaining_lines in
-  let light_to_temperature, remaining_lines = get_next_map remaining_lines in
-  let temperature_to_humidity, remaining_lines = get_next_map remaining_lines in
-  let humidity_to_location, remaining_lines = get_next_map remaining_lines in
-  let locations =
-    find_mappings seed_to_soil seeds
-    |> find_mappings soil_to_fertilizer
-    |> find_mappings fertilizer_to_water
-    |> find_mappings water_to_light
-    |> find_mappings light_to_temperature
-    |> find_mappings temperature_to_humidity
-    |> find_mappings humidity_to_location
-    |> List.hd |> String.split_on_char ' ' |> List.map int_of_string
-  in
+  let locations = solve (List.hd seeds) remaining_lines in
   let minimum_location =
     List.fold_left min (List.hd locations) (List.tl locations)
   in
